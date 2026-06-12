@@ -1,0 +1,446 @@
+{
+  "teams": {
+    "MEX": {
+      "full_name": "Mexico",
+      "short_name": "Mexico",
+      "stadium": "Estadio Mexico",
+      "altitude_home_m": 0,
+      "wc_group": "A",
+      "seed": 1,
+      "players": []
+    },
+    "KOR": {
+      "full_name": "South Korea",
+      "short_name": "S.Korea",
+      "stadium": "Estadio South Korea",
+      "altitude_home_m": 0,
+      "wc_group": "A",
+      "seed": 2,
+      "players": []
+    },
+    "RSA": {
+      "full_name": "South Africa",
+      "short_name": "S.Africa",
+      "stadium": "Estadio South Africa",
+      "altitude_home_m": 0,
+      "wc_group": "A",
+      "seed": 3,
+      "players": []
+    },
+    "CZE": {
+      "full_name": "Czechia",
+      "short_name": "Czechia",
+      "stadium": "Estadio Czechia",
+      "altitude_home_m": 0,
+      "wc_group": "A",
+      "seed": 4,
+      "players": []
+    },
+    "CAN": {
+      "full_name": "Canada",
+      "short_name": "Canada",
+      "stadium": "Estadio Canada",
+      "altitude_home_m": 0,
+      "wc_group": "B",
+      "seed": 1,
+      "players": []
+    },
+    "SUI": {
+      "full_name": "Switzerland",
+      "short_name": "Switzerl.",
+      "stadium": "Estadio Switzerland",
+      "altitude_home_m": 0,
+      "wc_group": "B",
+      "seed": 2,
+      "players": []
+    },
+    "QAT": {
+      "full_name": "Qatar",
+      "short_name": "Qatar",
+      "stadium": "Estadio Qatar",
+      "altitude_home_m": 0,
+      "wc_group": "B",
+      "seed": 3,
+      "players": []
+    },
+    "BIH": {
+      "full_name": "Bosnia and Herzegovina",
+      "short_name": "Bosnia",
+      "stadium": "Estadio Bosnia and Herzegovina",
+      "altitude_home_m": 0,
+      "wc_group": "B",
+      "seed": 4,
+      "players": []
+    },
+    "USA": {
+      "full_name": "United States",
+      "short_name": "USA",
+      "stadium": "Estadio United States",
+      "altitude_home_m": 0,
+      "wc_group": "C",
+      "seed": 1,
+      "players": []
+    },
+    "PAR": {
+      "full_name": "Paraguay",
+      "short_name": "Paraguay",
+      "stadium": "Estadio Paraguay",
+      "altitude_home_m": 60,
+      "wc_group": "C",
+      "seed": 2,
+      "players": []
+    },
+    "AUS": {
+      "full_name": "Australia",
+      "short_name": "Australia",
+      "stadium": "Estadio Australia",
+      "altitude_home_m": 0,
+      "wc_group": "C",
+      "seed": 3,
+      "players": []
+    },
+    "TUR": {
+      "full_name": "Türkiye",
+      "short_name": "Türkiye",
+      "stadium": "Estadio Türkiye",
+      "altitude_home_m": 0,
+      "wc_group": "C",
+      "seed": 4,
+      "players": []
+    },
+    "ARG": {
+      "full_name": "Argentina",
+      "short_name": "Argentina",
+      "stadium": "Estadio Argentina",
+      "altitude_home_m": 600,
+      "wc_group": "D",
+      "seed": 1,
+      "players": []
+    },
+    "ECU": {
+      "full_name": "Ecuador",
+      "short_name": "Ecuador",
+      "stadium": "Estadio Ecuador",
+      "altitude_home_m": 2800,
+      "wc_group": "D",
+      "seed": 2,
+      "players": []
+    },
+    "ALG": {
+      "full_name": "Algeria",
+      "short_name": "Algeria",
+      "stadium": "Estadio Algeria",
+      "altitude_home_m": 0,
+      "wc_group": "D",
+      "seed": 3,
+      "players": []
+    },
+    "COL": {
+      "full_name": "Colombia",
+      "short_name": "Colombia",
+      "stadium": "Estadio Colombia",
+      "altitude_home_m": 2600,
+      "wc_group": "D",
+      "seed": 4,
+      "players": []
+    },
+    "BRA": {
+      "full_name": "Brazil",
+      "short_name": "Brazil",
+      "stadium": "Estadio Brazil",
+      "altitude_home_m": 760,
+      "wc_group": "E",
+      "seed": 1,
+      "players": []
+    },
+    "MAR": {
+      "full_name": "Morocco",
+      "short_name": "Morocco",
+      "stadium": "Estadio Morocco",
+      "altitude_home_m": 0,
+      "wc_group": "E",
+      "seed": 2,
+      "players": []
+    },
+    "CRO": {
+      "full_name": "Croatia",
+      "short_name": "Croatia",
+      "stadium": "Estadio Croatia",
+      "altitude_home_m": 0,
+      "wc_group": "E",
+      "seed": 3,
+      "players": []
+    },
+    "SEN": {
+      "full_name": "Senegal",
+      "short_name": "Senegal",
+      "stadium": "Estadio Senegal",
+      "altitude_home_m": 0,
+      "wc_group": "E",
+      "seed": 4,
+      "players": []
+    },
+    "FRA": {
+      "full_name": "France",
+      "short_name": "France",
+      "stadium": "Estadio France",
+      "altitude_home_m": 0,
+      "wc_group": "F",
+      "seed": 1,
+      "players": []
+    },
+    "NOR": {
+      "full_name": "Norway",
+      "short_name": "Norway",
+      "stadium": "Estadio Norway",
+      "altitude_home_m": 0,
+      "wc_group": "F",
+      "seed": 2,
+      "players": []
+    },
+    "CIV": {
+      "full_name": "Côte Ivoire",
+      "short_name": "C.Ivoire",
+      "stadium": "Estadio Côte Ivoire",
+      "altitude_home_m": 0,
+      "wc_group": "F",
+      "seed": 3,
+      "players": []
+    },
+    "NZL": {
+      "full_name": "New Zealand",
+      "short_name": "N.Zealand",
+      "stadium": "Estadio New Zealand",
+      "altitude_home_m": 0,
+      "wc_group": "F",
+      "seed": 4,
+      "players": []
+    },
+    "ENG": {
+      "full_name": "England",
+      "short_name": "England",
+      "stadium": "Estadio England",
+      "altitude_home_m": 0,
+      "wc_group": "G",
+      "seed": 1,
+      "players": []
+    },
+    "SWE": {
+      "full_name": "Sweden",
+      "short_name": "Sweden",
+      "stadium": "Estadio Sweden",
+      "altitude_home_m": 0,
+      "wc_group": "G",
+      "seed": 2,
+      "players": []
+    },
+    "EGY": {
+      "full_name": "Egypt",
+      "short_name": "Egypt",
+      "stadium": "Estadio Egypt",
+      "altitude_home_m": 0,
+      "wc_group": "G",
+      "seed": 3,
+      "players": []
+    },
+    "UZB": {
+      "full_name": "Uzbekistan",
+      "short_name": "Uzbek.",
+      "stadium": "Estadio Uzbekistan",
+      "altitude_home_m": 460,
+      "wc_group": "G",
+      "seed": 4,
+      "players": []
+    },
+    "ESP": {
+      "full_name": "Spain",
+      "short_name": "Spain",
+      "stadium": "Estadio Spain",
+      "altitude_home_m": 650,
+      "wc_group": "H",
+      "seed": 1,
+      "players": []
+    },
+    "IRN": {
+      "full_name": "Iran",
+      "short_name": "Iran",
+      "stadium": "Estadio Iran",
+      "altitude_home_m": 1200,
+      "wc_group": "H",
+      "seed": 2,
+      "players": []
+    },
+    "URU": {
+      "full_name": "Uruguay",
+      "short_name": "Uruguay",
+      "stadium": "Estadio Uruguay",
+      "altitude_home_m": 43,
+      "wc_group": "H",
+      "seed": 3,
+      "players": []
+    },
+    "SCO": {
+      "full_name": "Scotland",
+      "short_name": "Scotland",
+      "stadium": "Estadio Scotland",
+      "altitude_home_m": 0,
+      "wc_group": "H",
+      "seed": 4,
+      "players": []
+    },
+    "GER": {
+      "full_name": "Germany",
+      "short_name": "Germany",
+      "stadium": "Estadio Germany",
+      "altitude_home_m": 0,
+      "wc_group": "I",
+      "seed": 1,
+      "players": []
+    },
+    "NED": {
+      "full_name": "Netherlands",
+      "short_name": "Nether.",
+      "stadium": "Estadio Netherlands",
+      "altitude_home_m": 0,
+      "wc_group": "I",
+      "seed": 2,
+      "players": []
+    },
+    "CPV": {
+      "full_name": "Cabo Verde",
+      "short_name": "C.Verde",
+      "stadium": "Estadio Cabo Verde",
+      "altitude_home_m": 0,
+      "wc_group": "I",
+      "seed": 3,
+      "players": []
+    },
+    "GHA": {
+      "full_name": "Ghana",
+      "short_name": "Ghana",
+      "stadium": "Estadio Ghana",
+      "altitude_home_m": 0,
+      "wc_group": "I",
+      "seed": 4,
+      "players": []
+    },
+    "POR": {
+      "full_name": "Portugal",
+      "short_name": "Portugal",
+      "stadium": "Estadio Portugal",
+      "altitude_home_m": 0,
+      "wc_group": "J",
+      "seed": 1,
+      "players": []
+    },
+    "JOR": {
+      "full_name": "Jordan",
+      "short_name": "Jordan",
+      "stadium": "Estadio Jordan",
+      "altitude_home_m": 770,
+      "wc_group": "J",
+      "seed": 2,
+      "players": []
+    },
+    "PAN": {
+      "full_name": "Panama",
+      "short_name": "Panama",
+      "stadium": "Estadio Panama",
+      "altitude_home_m": 0,
+      "wc_group": "J",
+      "seed": 3,
+      "players": []
+    },
+    "CUR": {
+      "full_name": "Curaçao",
+      "short_name": "Curaçao",
+      "stadium": "Estadio Curaçao",
+      "altitude_home_m": 0,
+      "wc_group": "J",
+      "seed": 4,
+      "players": []
+    },
+    "BEL": {
+      "full_name": "Belgium",
+      "short_name": "Belgium",
+      "stadium": "Estadio Belgium",
+      "altitude_home_m": 0,
+      "wc_group": "K",
+      "seed": 1,
+      "players": []
+    },
+    "KSA": {
+      "full_name": "Saudi Arabia",
+      "short_name": "S.Arabia",
+      "stadium": "Estadio Saudi Arabia",
+      "altitude_home_m": 600,
+      "wc_group": "K",
+      "seed": 2,
+      "players": []
+    },
+    "JPN": {
+      "full_name": "Japan",
+      "short_name": "Japan",
+      "stadium": "Estadio Japan",
+      "altitude_home_m": 0,
+      "wc_group": "K",
+      "seed": 3,
+      "players": []
+    },
+    "TUN": {
+      "full_name": "Tunisia",
+      "short_name": "Tunisia",
+      "stadium": "Estadio Tunisia",
+      "altitude_home_m": 0,
+      "wc_group": "K",
+      "seed": 4,
+      "players": []
+    },
+    "HAI": {
+      "full_name": "Haiti",
+      "short_name": "Haiti",
+      "stadium": "Estadio Haiti",
+      "altitude_home_m": 0,
+      "wc_group": "L",
+      "seed": 1,
+      "players": []
+    },
+    "IRQ": {
+      "full_name": "Iraq",
+      "short_name": "Iraq",
+      "stadium": "Estadio Iraq",
+      "altitude_home_m": 34,
+      "wc_group": "L",
+      "seed": 3,
+      "players": []
+    },
+    "COD": {
+      "full_name": "DR Congo",
+      "short_name": "DR Congo",
+      "stadium": "Estadio DR Congo",
+      "altitude_home_m": 320,
+      "wc_group": "L",
+      "seed": 4,
+      "players": []
+    }
+  },
+  "data_sources": {
+    "players_csv": null,
+    "matches_csv": null,
+    "players_db": {
+      "dsn": "host=localhost dbname=whowins user=postgres",
+      "player_view": "v_player_details",
+      "match_view": "v_match_history",
+      "team_fn": "fn_team_players",
+      "season_label": "2026"
+    }
+  },
+  "model_settings": {
+    "anova_significance": 0.05,
+    "regression_cv_folds": 5,
+    "min_matches_history": 5,
+    "home_advantage_weight": 1.0,
+    "seasons_weight_decay": 0.8,
+    "use_match_player_stats": true
+  }
+}

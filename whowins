@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+# =============================================================================
+# whowins — Predictor de resultados de fútbol
+# Uso: whowins <TeamA> <TeamB> [opciones]
+#
+# Opciones:
+#   --home    <team|neutral>   Equipo local (default: neutral)
+#   --weather <clear|cloudy|rain>  Clima (default: clear)
+#   --altitude <metros>        Altitud en m.s.n.m (default: del estadio)
+#   --output  <directorio>     Directorio de salida (default: output/<fecha>)
+#   --config  <ruta>           Config de equipos (default: config/teams.json)
+#   --help                     Muestra esta ayuda
+# =============================================================================
+
+set -euo pipefail
+
+# ── Colores ───────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; BOLD='\033[1m'; RESET='\033[0m'
+
+# ── Directorio base del script ────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# ── Banner ────────────────────────────────────────────────────────────────────
+banner() {
+  echo -e "${BOLD}${BLUE}"
+  echo "  ╔══════════════════════════════════════╗"
+  echo "  ║      ⚽  W H O W I N S  ⚽           ║"
+  echo "  ║   Predictor Estadístico de Fútbol    ║"
+  echo "  ╚══════════════════════════════════════╝"
+  echo -e "${RESET}"
+}
+
+# ── Ayuda ─────────────────────────────────────────────────────────────────────
+usage() {
+  echo -e "${BOLD}Uso:${RESET}  whowins <TeamA> <TeamB> [opciones]"
+  echo ""
+  echo -e "${BOLD}Opciones:${RESET}"
+  echo "  --home    <team|neutral>      Equipo que juega de local"
+  echo "  --weather <clear|cloudy|rain> Condición climática"
+  echo "  --altitude <metros>           Altitud del estadio"
+  echo "  --output  <dir>               Directorio de resultados"
+  echo "  --config  <ruta.json>         Archivo de configuración de equipos"
+  echo "  --list                        Lista equipos disponibles"
+  echo "  --help                        Esta ayuda"
+  echo ""
+  echo -e "${BOLD}Ejemplos:${RESET}"
+  echo "  whowins TeamA TeamB"
+  echo "  whowins TeamA TeamB --home TeamA --weather rain"
+  echo "  whowins TeamB TeamC --altitude 2800 --weather cloudy"
+  echo ""
+  exit 0
+}
+
+# ── Listar equipos desde config ───────────────────────────────────────────────
+list_teams() {
+  local cfg="${1:-config/teams.json}"
+  if [[ ! -f "$cfg" ]]; then
+    echo -e "${RED}Config no encontrado: $cfg${RESET}"
+    exit 1
+  fi
+  echo -e "${BOLD}Equipos disponibles en $cfg:${RESET}"
+  # Extraer con python3 o python, fallback a grep
+  if command -v python3 &>/dev/null; then
+    python3 -c "
+import json, sys
+with open('$cfg') as f:
+    c = json.load(f)
+for tid, t in c['teams'].items():
+    print(f'  {tid:12s}  ->  {t[\"full_name\"]}  ({len(t[\"players\"])} jugadores)')
+"
+  else
+    grep -oP '"[A-Za-z0-9_]+"(?=\s*:\s*\{)' "$cfg" | head -20
+  fi
+  exit 0
+}
+
+# ── Verificar dependencias ─────────────────────────────────────────────────────
+check_deps() {
+  local missing=()
+  command -v Rscript &>/dev/null || missing+=("R/Rscript")
+
+  # Verificar paquetes R críticos
+  Rscript -e "
+pkgs <- c('dplyr','tidyr','readr','jsonlite','ggplot2','car','MASS','glmnet','lmtest','pROC')
+missing <- pkgs[!pkgs %in% installed.packages()[,1]]
+if(length(missing)>0) cat('MISSING_R:', paste(missing, collapse=','), '\n')
+" 2>/dev/null | grep -q "MISSING_R" && {
+    echo -e "${YELLOW}[WARN] Algunos paquetes R faltan. Intentando instalar...${RESET}"
+    Rscript -e "
+      options(repos='https://cloud.r-project.org/')
+      pkgs <- c('dplyr','tidyr','readr','jsonlite','ggplot2','car','MASS','glmnet','lmtest','pROC')
+      missing <- pkgs[!pkgs %in% installed.packages()[,1]]
+      if(length(missing)>0) install.packages(missing, quiet=TRUE)
+    " 2>/dev/null || true
+  }
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo -e "${RED}[ERROR] Dependencias faltantes: ${missing[*]}${RESET}"
+    echo "  Instala R: https://www.r-project.org/"
+    exit 1
+  fi
+}
+
+# ── Validar argumentos ────────────────────────────────────────────────────────
+validate_args() {
+  local team_a="$1" team_b="$2" cfg="$3"
+
+  if [[ -z "$team_a" || -z "$team_b" ]]; then
+    echo -e "${RED}[ERROR] Debes especificar dos equipos.${RESET}"
+    usage
+  fi
+
+  if [[ "$team_a" == "$team_b" ]]; then
+    echo -e "${RED}[ERROR] Los dos equipos deben ser diferentes.${RESET}"
+    exit 1
+  fi
+
+  # Verificar que existen en la config
+  if command -v python3 &>/dev/null && [[ -f "$cfg" ]]; then
+    local teams
+    teams=$(python3 -c "import json; c=json.load(open('$cfg')); print(' '.join(c['teams'].keys()))")
+    for t in "$team_a" "$team_b"; do
+      if [[ ! " $teams " =~ " $t " ]]; then
+        echo -e "${RED}[ERROR] Equipo '$t' no encontrado en config.${RESET}"
+        echo -e "  Equipos disponibles: ${YELLOW}$teams${RESET}"
+        echo "  Usa: whowins --list"
+        exit 1
+      fi
+    done
+  fi
+}
+
+# ── Spinner de espera ─────────────────────────────────────────────────────────
+spinner() {
+  local pid=$1 msg="${2:-Procesando...}"
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(( (i+1) % ${#spin} ))
+    printf "\r${YELLOW}  ${spin:$i:1}  $msg${RESET}"
+    sleep 0.12
+  done
+  printf "\r%*s\r" 60 ""   # limpiar línea
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ══════════════════════════════════════════════════════════════════════════════
+main() {
+  # Verificar al menos 2 args (o flags especiales)
+  [[ $# -eq 0 ]] && { banner; usage; }
+  [[ "$1" == "--help" || "$1" == "-h" ]] && { banner; usage; }
+
+  # Flags sin equipos
+  local cfg_pre="config/teams.json"
+  for arg in "$@"; do
+    [[ "$arg" == "--list" ]] && list_teams "$cfg_pre"
+  done
+
+  # ── Parse argumentos ───────────────────────────────────────────────────────
+  local team_a="$1"
+  local team_b="$2"
+  shift 2
+
+  local home="neutral"
+  local weather="clear"
+  local altitude=""
+  local out_dir=""
+  local config="config/teams.json"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --home)     home="$2";     shift 2 ;;
+      --weather)  weather="$2";  shift 2 ;;
+      --altitude) altitude="$2"; shift 2 ;;
+      --output)   out_dir="$2";  shift 2 ;;
+      --config)   config="$2";   shift 2 ;;
+      --help|-h)  usage ;;
+      *) echo -e "${YELLOW}[WARN] Opción desconocida: $1${RESET}"; shift ;;
+    esac
+  done
+
+  # Directorio de salida con timestamp
+  [[ -z "$out_dir" ]] && out_dir="output/$(date +%Y%m%d_%H%M%S)_${team_a}_vs_${team_b}"
+
+  # ── Validaciones ───────────────────────────────────────────────────────────
+  banner
+  echo -e "${BOLD}  Partido:${RESET}  $team_a  vs  $team_b"
+  echo -e "${BOLD}  Local  :${RESET}  $home"
+  echo -e "${BOLD}  Clima  :${RESET}  $weather"
+  [[ -n "$altitude" ]] && echo -e "${BOLD}  Altitud:${RESET}  ${altitude} m"
+  echo -e "${BOLD}  Config :${RESET}  $config"
+  echo -e "${BOLD}  Salida :${RESET}  $out_dir"
+  echo ""
+
+  check_deps
+  validate_args "$team_a" "$team_b" "$config"
+
+  # ── Construir args para Rscript ───────────────────────────────────────────
+  local r_args=("$team_a" "$team_b"
+    "--home"    "$home"
+    "--weather" "$weather"
+    "--output"  "$out_dir"
+    "--config"  "$config"
+  )
+  [[ -n "$altitude" ]] && r_args+=("--altitude" "$altitude")
+
+  # ── Ejecutar análisis ─────────────────────────────────────────────────────
+  mkdir -p "$out_dir"
+  local log_file="$out_dir/analysis.log"
+
+  echo -e "${YELLOW}  Ejecutando análisis estadístico...${RESET}"
+  echo ""
+
+  # Correr R en background y mostrar spinner
+  Rscript R/analysis.R "${r_args[@]}" > "$out_dir/_stdout.tmp" 2>"$log_file" &
+  local r_pid=$!
+  spinner $r_pid "Regresión logística + ANOVA + Poisson..."
+  wait $r_pid
+  local exit_code=$?
+
+  if [[ $exit_code -ne 0 ]]; then
+    echo -e "${RED}[ERROR] El análisis R falló (código $exit_code).${RESET}"
+    echo -e "  Revisa el log: ${YELLOW}$log_file${RESET}"
+    echo ""
+    cat "$log_file" | grep -E "^\[ERROR\]|Error|error" | head -10 || true
+    exit 1
+  fi
+
+  # ── Mostrar resultado ─────────────────────────────────────────────────────
+  echo -e "${BOLD}${GREEN}"
+  echo "  ┌─────────────────────────────────────┐"
+  echo "  │         RESULTADO PREDICHO           │"
+  echo "  └─────────────────────────────────────┘"
+  echo -e "${RESET}"
+
+  # Leer stdout de R y mostrarlo formateado
+  if [[ -f "$out_dir/_stdout.tmp" ]]; then
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^${team_a} ]]; then
+        echo -e "  ${BOLD}${BLUE}$line${RESET}"
+      elif [[ "$line" =~ ^${team_b} ]]; then
+        echo -e "  ${BOLD}${RED}$line${RESET}"
+      elif [[ "$line" =~ ^Empate ]]; then
+        echo -e "  ${BOLD}${YELLOW}$line${RESET}"
+      elif [[ -n "$line" ]]; then
+        echo -e "  $line"
+      fi
+    done < "$out_dir/_stdout.tmp"
+    rm -f "$out_dir/_stdout.tmp"
+  fi
+
+  echo ""
+  echo -e "${GREEN}  ✔ Análisis completado.${RESET}"
+  echo -e "  📁 Resultados en: ${BOLD}$out_dir/${RESET}"
+  echo ""
+
+  # Listar archivos generados
+  if [[ -d "$out_dir" ]]; then
+    echo -e "${BOLD}  Archivos generados:${RESET}"
+    for f in "$out_dir"/*.txt "$out_dir"/*.png; do
+      [[ -f "$f" ]] && echo -e "    • $(basename "$f")"
+    done
+  fi
+  echo ""
+}
+
+main "$@"
