@@ -46,100 +46,6 @@ R_CONFIG_TEMPLATE = {
     }
 }
 
-
-def get_wc2026_teams(conn, group_filter=None, team_filter=None) -> dict:
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-    # Obtener la temporada WC2026 más reciente
-    cur.execute("""
-        SELECT MAX(s.season_id)
-        FROM seasons s
-        JOIN competitions c
-            ON c.competition_id = s.competition_id
-        WHERE c.short_name = 'WC2026'
-          AND s.label = '2026'
-    """)
-
-    season_id = cur.fetchone()[0]
-
-    if not season_id:
-        raise RuntimeError(
-            "No se encontró ninguna temporada WC2026 con label=2026"
-        )
-
-    where = ""
-    params = [season_id]
-
-    if group_filter:
-        where += " AND g.wc_group = ANY(%s)"
-        params.append(group_filter)
-
-    if team_filter:
-        where += " AND t.team_code = ANY(%s)"
-        params.append(team_filter)
-
-    cur.execute(f"""
-        SELECT
-            t.team_code,
-            t.full_name,
-            t.short_name,
-            t.altitude_home_m,
-            t.stadium,
-            g.wc_group,
-            g.seed,
-            COALESCE(
-                array_agg(
-                    DISTINCT p.player_code
-                    ORDER BY p.player_code
-                ) FILTER (
-                    WHERE p.player_code IS NOT NULL
-                ),
-                ARRAY[]::varchar[]
-            ) AS player_codes
-        FROM teams t
-        JOIN wc2026_groups g
-            ON g.team_code = t.team_code
-        LEFT JOIN team_players tp
-            ON tp.team_id = t.team_id
-           AND tp.season_id = %s
-           AND tp.status = 'active'
-        LEFT JOIN players p
-            ON p.player_id = tp.player_id
-        WHERE 1=1
-            {where}
-        GROUP BY
-            t.team_code,
-            t.full_name,
-            t.short_name,
-            t.altitude_home_m,
-            t.stadium,
-            g.wc_group,
-            g.seed
-        ORDER BY
-            g.wc_group,
-            g.seed
-    """, params)
-
-    teams = {}
-
-    for row in cur.fetchall():
-        code = row["team_code"]
-
-        teams[code] = {
-            "full_name": row["full_name"],
-            "short_name": row["short_name"],
-            "stadium": row["stadium"] or f"Estadio {row['full_name']}",
-            "altitude_home_m": row["altitude_home_m"],
-            "wc_group": row["wc_group"],
-            "seed": row["seed"],
-            "players": list(row["player_codes"])
-        }
-
-    cur.close()
-    return teams
-
-
-'''
 def get_wc2026_teams(conn, group_filter=None, team_filter=None) -> dict:
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -198,7 +104,6 @@ def get_wc2026_teams(conn, group_filter=None, team_filter=None) -> dict:
     cur.close()
     return teams
 
-'''
 
 def main():
     parser = argparse.ArgumentParser(

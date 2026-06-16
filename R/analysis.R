@@ -242,28 +242,51 @@ load_data <- function(cfg_path) {
 }
 
 # ── Stats agregadas por equipo ────────────────────────────────────────────────
-team_stats <- function(players, team_id, player_ids) {
+team_stats <- function(players, team_id, player_ids, strict=FALSE) {
   df <- players %>% filter(player_id %in% player_ids)
-  if (nrow(df) == 0) err(paste("Sin jugadores para:", team_id))
+  if (nrow(df) == 0) {
+    if (strict) err(paste("Sin jugadores para:", team_id))
+    msg(paste("[WARN] Sin jugadores en DB para", team_id, "- usando valores promedio"))
+    return(tibble(
+      team=team_id, avg_goals=0.05, avg_assists=0.04, avg_shots_ot=0.5,
+      avg_pass_acc=75.0, avg_tackles=1.2, avg_intercept=1.0,
+      avg_dribbles=0.8, avg_rating=7.0, discipline=0.1
+    ))
+  }
+  safe_pm <- function(x, m) ifelse(m > 0, x / m, 0)
   tibble(
     team          = team_id,
-    avg_goals     = mean(df$goals / df$matches, na.rm=TRUE),
-    avg_assists   = mean(df$assists / df$matches, na.rm=TRUE),
-    avg_shots_ot  = mean(df$shots_on_target / df$matches, na.rm=TRUE),
-    avg_pass_acc  = mean(df$pass_accuracy, na.rm=TRUE),
-    avg_tackles   = mean(df$tackles / df$matches, na.rm=TRUE),
-    avg_intercept = mean(df$interceptions / df$matches, na.rm=TRUE),
-    avg_dribbles  = mean(df$dribbles_completed / df$matches, na.rm=TRUE),
-    avg_rating    = mean(df$rating, na.rm=TRUE),
-    discipline    = mean((df$yellow_cards + df$red_cards*3) / df$matches, na.rm=TRUE)
+    avg_goals     = mean(safe_pm(df$goals,             df$matches), na.rm=TRUE),
+    avg_assists   = mean(safe_pm(df$assists,            df$matches), na.rm=TRUE),
+    avg_shots_ot  = mean(safe_pm(df$shots_on_target,   df$matches), na.rm=TRUE),
+    avg_pass_acc  = mean(df$pass_accuracy,                          na.rm=TRUE),
+    avg_tackles   = mean(safe_pm(df$tackles,            df$matches), na.rm=TRUE),
+    avg_intercept = mean(safe_pm(df$interceptions,      df$matches), na.rm=TRUE),
+    avg_dribbles  = mean(safe_pm(df$dribbles_completed, df$matches), na.rm=TRUE),
+    avg_rating    = mean(df$rating,                                  na.rm=TRUE),
+    discipline    = mean(safe_pm(df$yellow_cards + df$red_cards*3,
+                                 df$matches),                        na.rm=TRUE)
   )
 }
 
 # ── Features por partido ──────────────────────────────────────────────────────
 build_features <- function(matches, players, cfg) {
   tc <- cfg$teams
-  agg <- lapply(names(tc), function(tid) team_stats(players, tid, tc[[tid]]$players)) %>%
-    bind_rows()
+
+  # Only aggregate teams that actually appear in the matches history
+  # OR that have players loaded — avoids crashing on teams not yet in DB
+  teams_in_matches <- unique(c(matches$home_team, matches$away_team))
+  teams_with_data  <- names(tc)[sapply(names(tc), function(tid) {
+    has_matches  <- tid %in% teams_in_matches
+    has_players  <- any(players$player_id %in% (tc[[tid]]$players %||% character(0)))
+    has_matches || has_players
+  })]
+
+  if (length(teams_with_data) == 0) teams_with_data <- names(tc)
+
+  agg <- lapply(teams_with_data, function(tid) {
+    team_stats(players, tid, tc[[tid]]$players %||% character(0), strict=FALSE)
+  }) %>% bind_rows()
 
   matches <- matches %>%
     mutate(
@@ -505,69 +528,120 @@ bayesian_update <- function(prior_probs, matches, team_a, team_b) {
   )
 }
 
-# ── 5. Modelo Poisson de goles ─────────────────────────────────────────────────
-run_poisson <- function(matches, team_a, team_b, home_team) {
+# ── 5. Modelo Poisson de goles + predicción de marcador ─────────────────────
+run_poisson <- function(matches, players, cfg, team_a, team_b, home_team) {
   msg("Distribución Poisson de goles...")
+  tc <- cfg$teams
 
-  get_lambda <- function(team) {
-    df <- matches %>%
-      filter(home_team == team | away_team == team) %>%
-      mutate(scored = if_else(home_team == team, home_goals, away_goals),
-             conceded = if_else(home_team == team, away_goals, home_goals))
-    if (nrow(df) == 0) return(list(att=1.3, def=1.2))
-    list(att=mean(df$scored, na.rm=TRUE), def=mean(df$conceded, na.rm=TRUE))
+  has_history <- nrow(matches) > 0
+
+  # ── Lambdas desde historial de partidos ────────────────────────────────────
+  if (has_history) {
+    get_lambda <- function(team) {
+      df <- matches %>%
+        filter(home_team == team | away_team == team) %>%
+        mutate(scored   = if_else(home_team == team, home_goals, away_goals),
+               conceded = if_else(home_team == team, away_goals, home_goals))
+      if (nrow(df) == 0) return(list(att=1.3, def=1.3))
+      list(att=mean(df$scored, na.rm=TRUE), def=mean(df$conceded, na.rm=TRUE))
+    }
+    la <- get_lambda(team_a)
+    lb <- get_lambda(team_b)
+    league_avg <- mean(c(matches$home_goals, matches$away_goals), na.rm=TRUE)
+    if (!is.finite(league_avg) || league_avg <= 0) league_avg <- 1.3
+
+    lambda_a <- (la$att / league_avg) * (lb$def / league_avg) * league_avg
+    lambda_b <- (lb$att / league_avg) * (la$def / league_avg) * league_avg
+
+  } else {
+    # ── Sin historial: estimar lambdas desde stats de jugadores ──────────────
+    msg("  Sin partidos históricos — estimando goles desde stats de jugadores")
+    sa <- team_stats(players, team_a, tc[[team_a]]$players %||% character(0))
+    sb <- team_stats(players, team_b, tc[[team_b]]$players %||% character(0))
+
+    # Proxy: goles/partido del equipo × factor ofensivo vs defensivo rival
+    # Escalar avg_goals (por jugador) al equipo completo (~11 en campo)
+    team_goals_a <- sa$avg_goals * 4.5   # ~4.5 jugadores ofensivos contribuyen
+    team_goals_b <- sb$avg_goals * 4.5
+
+    # Ajuste por calidad defensiva relativa (pass_acc, tackles como proxy)
+    def_adj_a <- (sb$avg_tackles / max(sa$avg_tackles, 0.1)) * 0.15 + 0.85
+    def_adj_b <- (sa$avg_tackles / max(sb$avg_tackles, 0.1)) * 0.15 + 0.85
+
+    lambda_a <- max(0.5, min(team_goals_a * def_adj_a, 4.0))
+    lambda_b <- max(0.5, min(team_goals_b * def_adj_b, 4.0))
   }
 
-  la <- get_lambda(team_a)
-  lb <- get_lambda(team_b)
+  # ── Ajuste localía ─────────────────────────────────────────────────────────
+  if      (home_team == team_a) { lambda_a <- lambda_a * 1.12; lambda_b <- lambda_b * 0.90 }
+  else if (home_team == team_b) { lambda_b <- lambda_b * 1.12; lambda_a <- lambda_a * 0.90 }
 
-  # Ajuste Dixon-Coles simplificado: ataque vs defensa rival
-  league_avg <- mean(c(matches$home_goals, matches$away_goals), na.rm=TRUE)
-  if (league_avg <= 0) league_avg <- 1.3
+  lambda_a <- max(0.3, lambda_a)
+  lambda_b <- max(0.3, lambda_b)
 
-  lambda_a <- (la$att / league_avg) * (lb$def / league_avg) * league_avg
-  lambda_b <- (lb$att / league_avg) * (la$def / league_avg) * league_avg
+  # ── Matriz de probabilidad de marcadores (hasta 8 goles c/u) ──────────────
+  max_g <- 8
+  g_range <- 0:max_g
+  score_matrix <- outer(g_range, g_range,
+    FUN = function(x, y) dpois(x, lambda_a) * dpois(y, lambda_b))
+  rownames(score_matrix) <- as.character(g_range)
+  colnames(score_matrix) <- as.character(g_range)
 
-  # Ajuste local
-  if      (home_team == team_a) { lambda_a <- lambda_a * 1.10; lambda_b <- lambda_b * 0.92 }
-  else if (home_team == team_b) { lambda_b <- lambda_b * 1.10; lambda_a <- lambda_a * 0.92 }
-
-  lambda_a <- max(0.3, lambda_a); lambda_b <- max(0.3, lambda_b)
-
-  # Matriz de probabilidades score (hasta 7 goles c/u)
-  max_g <- 7
-  score_matrix <- outer(0:max_g, 0:max_g,
-    FUN=function(x, y) dpois(x, lambda_a) * dpois(y, lambda_b))
-  rownames(score_matrix) <- 0:max_g; colnames(score_matrix) <- 0:max_g
-
-  p_a_wins <- sum(score_matrix[lower.tri(score_matrix, diag=FALSE)], na.rm=TRUE)
-  # upper.tri = B gana (más goles B → columna > fila)
-  p_b_wins <- sum(score_matrix[upper.tri(score_matrix, diag=FALSE)], na.rm=TRUE)
-  # Corregir: filas=goles_A, cols=goles_B → A gana cuando fila>col
   p_a_wins <- sum(score_matrix[row(score_matrix) > col(score_matrix)])
   p_b_wins <- sum(score_matrix[row(score_matrix) < col(score_matrix)])
   p_draw   <- sum(diag(score_matrix))
 
   # Normalizar
-  tot <- p_a_wins + p_draw + p_b_wins
-  p_a_wins <- p_a_wins/tot; p_draw <- p_draw/tot; p_b_wins <- p_b_wins/tot
+  tot      <- p_a_wins + p_b_wins + p_draw
+  p_a_wins <- p_a_wins / tot
+  p_b_wins <- p_b_wins / tot
+  p_draw   <- p_draw   / tot
 
-  # Resultado más probable
-  idx <- which(score_matrix == max(score_matrix), arr.ind=TRUE)
-  most_likely <- paste0(rownames(score_matrix)[idx[1,1]], "-",
-                        colnames(score_matrix)[idx[1,2]])
+  # ── Top 10 marcadores más probables ───────────────────────────────────────
+  sm_flat <- as.data.frame(as.table(score_matrix)) %>%
+    setNames(c("g_a","g_b","prob")) %>%
+    mutate(
+      g_a    = as.integer(as.character(g_a)),
+      g_b    = as.integer(as.character(g_b)),
+      score  = paste0(g_a, "-", g_b),
+      result = case_when(
+        g_a > g_b ~ paste0(team_a, " gana"),
+        g_a < g_b ~ paste0(team_b, " gana"),
+        TRUE      ~ "Empate"
+      )
+    ) %>%
+    arrange(desc(prob)) %>%
+    slice_head(n=10)
 
-  # Distribución de goles totales esperados
-  sim_n <- 50000; set.seed(42)
-  ga <- rpois(sim_n, lambda_a); gb <- rpois(sim_n, lambda_b)
+  most_likely <- sm_flat$score[1]
+
+  # ── Simulación Monte Carlo para intervalos de goles ───────────────────────
+  set.seed(42)
+  n_sim <- 50000
+  sim_a <- rpois(n_sim, lambda_a)
+  sim_b <- rpois(n_sim, lambda_b)
+
+  # Goles totales esperados con IC 80%
+  total_goals <- sim_a + sim_b
+  goals_ci_lo <- quantile(total_goals, 0.10)
+  goals_ci_hi <- quantile(total_goals, 0.90)
 
   list(
-    lambda_a=round(lambda_a,3), lambda_b=round(lambda_b,3),
-    p_a=round(p_a_wins,4), p_draw=round(p_draw,4), p_b=round(p_b_wins,4),
-    exp_goals_a=round(lambda_a,2), exp_goals_b=round(lambda_b,2),
-    most_likely=most_likely,
-    score_matrix=score_matrix,
-    sim_ga=ga, sim_gb=gb
+    lambda_a      = round(lambda_a, 3),
+    lambda_b      = round(lambda_b, 3),
+    p_a           = round(p_a_wins, 4),
+    p_draw        = round(p_draw,   4),
+    p_b           = round(p_b_wins, 4),
+    exp_goals_a   = round(lambda_a, 2),
+    exp_goals_b   = round(lambda_b, 2),
+    most_likely   = most_likely,
+    top_scores    = sm_flat,
+    score_matrix  = score_matrix,
+    goals_ci_lo   = round(goals_ci_lo, 1),
+    goals_ci_hi   = round(goals_ci_hi, 1),
+    used_history  = has_history,
+    sim_a         = sim_a,
+    sim_b         = sim_b
   )
 }
 
@@ -759,25 +833,47 @@ save_plots <- function(anova_res, fusion, nb_res, pl_impact, poisson,
     ggsave(file.path(out_dir,"05_nb_por_jugador.png"), g5, width=9, height=6, dpi=150)
   }, error=function(e) msg(paste("Plot 5:", e$message)))
 
-  # 6. Matriz de scores Poisson
+  # 6. Heatmap de marcadores + Top-10 barras
   tryCatch({
-    sm <- poisson$score_matrix
-    max_show <- 5
+    # 6a — Heatmap (hasta 5-5)
+    sm      <- poisson$score_matrix
+    max_show <- min(5, nrow(sm)-1)
     sm_df <- as.data.frame(sm[1:(max_show+1), 1:(max_show+1)]) %>%
       tibble::rownames_to_column("goles_A") %>%
       pivot_longer(-goles_A, names_to="goles_B", values_to="prob") %>%
       mutate(prob_pct = round(prob*100, 2),
              goles_A  = factor(goles_A, levels=as.character(0:max_show)),
              goles_B  = factor(goles_B, levels=as.character(0:max_show)))
-    g6 <- ggplot(sm_df, aes(x=goles_B, y=goles_A, fill=prob_pct)) +
-      geom_tile(color="white") +
-      geom_text(aes(label=paste0(prob_pct,"%")), size=3) +
+    g6a <- ggplot(sm_df, aes(x=goles_B, y=goles_A, fill=prob_pct)) +
+      geom_tile(color="white", linewidth=0.5) +
+      geom_text(aes(label=paste0(prob_pct,"%")), size=3.2, fontface="bold") +
       scale_fill_gradient(low="#FFF9C4", high="#E53935") +
-      labs(title=paste("Matriz de probabilidad de marcadores — Poisson"),
+      labs(title="Probabilidad de marcadores exactos (Poisson)",
            subtitle=paste(team_a, "(filas) vs", team_b, "(columnas)"),
            x=paste("Goles", team_b), y=paste("Goles", team_a), fill="Prob %") +
       theme_ww
-    ggsave(file.path(out_dir,"06_matriz_scores.png"), g6, width=7, height=6, dpi=150)
+    ggsave(file.path(out_dir,"06_matriz_scores.png"), g6a, width=7, height=6, dpi=150)
+
+    # 6b — Top-10 marcadores más probables (barras)
+    ts <- poisson$top_scores %>%
+      mutate(score = factor(score, levels=rev(score)),
+             color = case_when(
+               grepl(paste0("^", team_a, " gana"), result) ~ "#1565C0",
+               grepl(paste0("^", team_b, " gana"), result) ~ "#B71C1C",
+               TRUE ~ "#757575"
+             ))
+    g6b <- ggplot(ts, aes(x=score, y=prob*100, fill=result)) +
+      geom_col() + coord_flip() +
+      geom_text(aes(label=paste0(round(prob*100,1),"%")), hjust=-0.1, size=3.5) +
+      scale_fill_manual(values=c(
+        setNames("#1565C0", paste0(team_a, " gana")),
+        setNames("#B71C1C", paste0(team_b, " gana")),
+        "Empate" = "#757575"
+      )) +
+      labs(title="Top 10 marcadores más probables",
+           x="Marcador", y="Probabilidad (%)", fill="") +
+      theme_ww + ylim(0, max(ts$prob*100) * 1.2)
+    ggsave(file.path(out_dir,"06b_top_scores.png"), g6b, width=8, height=5, dpi=150)
   }, error=function(e) msg(paste("Plot 6:", e$message)))
 
   # 7. Actualización Bayesiana — prior vs posterior
@@ -904,18 +1000,32 @@ write_report <- function(team_a, team_b, fusion, bayes_upd, anova_res,
   lines <- c(lines, sep, " POISSON — DISTRIBUCIÓN DE GOLES", sep,
     paste(" λ", team_a, ":", poisson$lambda_a),
     paste(" λ", team_b, ":", poisson$lambda_b),
-    paste(" Resultado más probable:", poisson$most_likely),
+    paste(" Goles esperados:", team_a, poisson$exp_goals_a, "|", team_b, poisson$exp_goals_b),
+    paste(" Goles totales (IC 80%):", poisson$goals_ci_lo, "–", poisson$goals_ci_hi),
+    paste(" Fuente:", ifelse(poisson$used_history,
+                             "historial de partidos",
+                             "stats de jugadores (sin historial histórico)")),
     "",
-    " Probabilidades de marcadores (%):",
-    sprintf(" %6s", paste0("  ", team_b, "→")),
-    sprintf(" %s %s", paste0(team_a,"↓"),
-            paste(sprintf("%5s", 0:5), collapse=""))
+    " TOP 10 MARCADORES MÁS PROBABLES:",
+    sprintf(" %-6s  %-30s  %s", "Rank", "Marcador (resultado)", "Prob %"),
+    strrep("-", 50)
   )
 
-  sm <- round(poisson$score_matrix[1:6,1:6]*100, 1)
+  ts <- poisson$top_scores
+  for (i in seq_len(min(10, nrow(ts)))) {
+    lines <- c(lines, sprintf(" %4d.  %-4s  %-26s  %5.2f%%",
+      i, ts$score[i], ts$result[i], ts$prob[i]*100))
+  }
+
+  lines <- c(lines, "",
+    " Matriz de probabilidad de marcadores (0-5 × 0-5):",
+    sprintf(" %-6s %s", paste0(team_a, "↓"), paste(sprintf("%6s", 0:5), collapse="")),
+    strrep("-", 44)
+  )
+  sm <- round(poisson$score_matrix[1:6, 1:6]*100, 1)
   for (i in 1:6) {
-    lines <- c(lines, sprintf(" %6s %s", rownames(sm)[i],
-      paste(sprintf("%5.1f", sm[i,]), collapse="")))
+    lines <- c(lines, sprintf(" %-6s %s", rownames(sm)[i],
+      paste(sprintf("%6.2f", sm[i,]), collapse="")))
   }
 
   lines <- c(lines, "",
@@ -998,7 +1108,7 @@ main <- function() {
   nb_res <- run_naive_bayes_players(matches, players, cfg, team_a, team_b)
 
   # 5. Poisson
-  poisson <- run_poisson(matches, team_a, team_b, home_team)
+  poisson <- run_poisson(matches, players, cfg, team_a, team_b, home_team)
 
   # 6. H2H Bayesiano (prior neutro; se actualizará en fuse)
   bayes_upd <- bayesian_update(
@@ -1025,17 +1135,34 @@ main <- function() {
   # ── Salida estándar ────────────────────────────────────────────────────────
   f <- fusion$final
   cat("\n")
-  cat(sprintf("%s %.0f%%\n",  team_a, round(f["A"]*100)))
-  cat(sprintf("%s %.0f%%\n",  team_b, round(f["B"]*100)))
-  cat(sprintf("Empate %.0f%%\n", round(f["draw"]*100)))
-  cat("\n")
-  cat(sprintf("Resultado más probable : %s\n", poisson$most_likely))
-  cat(sprintf("Goles esperados        : %s %.1f  |  %s %.1f\n",
+  cat(paste0(strrep("═", 48), "\n"))
+  cat(sprintf("  ⚽  %s  vs  %s\n", team_a, team_b))
+  cat(paste0(strrep("─", 48), "\n"))
+  cat(sprintf("  %-18s  %5.1f%%\n", team_a,   round(f["A"]*100, 1)))
+  cat(sprintf("  %-18s  %5.1f%%\n", "Empate",  round(f["draw"]*100, 1)))
+  cat(sprintf("  %-18s  %5.1f%%\n", team_b,   round(f["B"]*100, 1)))
+  cat(paste0(strrep("─", 48), "\n"))
+
+  cat(sprintf("  Goles esperados : %s %.2f  |  %s %.2f\n",
               team_a, poisson$exp_goals_a, team_b, poisson$exp_goals_b))
-  cat(sprintf("Enfrentamientos H2H    : %d  (peso Bayesiano: %.2f)\n",
+  cat(sprintf("  Goles totales   : %.1f – %.1f  (IC 80%%)\n",
+              poisson$goals_ci_lo, poisson$goals_ci_hi))
+  cat(sprintf("  Datos usados    : %s\n",
+              ifelse(poisson$used_history, "historial de partidos", "stats de jugadores (sin historial)")))
+  cat(sprintf("  H2H             : %d partidos  (peso Bayesiano: %.2f)\n",
               bayes_upd$n_h2h, bayes_upd$update_weight))
-  cat(sprintf("\nReporte: %s/reporte_completo.txt\n", out_dir))
-  cat(sprintf("Gráficas: %s/0*.png\n", out_dir))
+
+  cat(paste0(strrep("─", 48), "\n"))
+  cat("  Top marcadores más probables:\n")
+  ts <- poisson$top_scores
+  for (i in seq_len(min(5, nrow(ts)))) {
+    cat(sprintf("    %d. %s  (%s)  %.1f%%\n",
+                i, ts$score[i], ts$result[i], ts$prob[i]*100))
+  }
+  cat(paste0(strrep("═", 48), "\n"))
+  cat(sprintf("\n  Reporte : %s/reporte_completo.txt\n", out_dir))
+  cat(sprintf("  Gráficas: %s/0*.png\n", out_dir))
+  cat("\n")
 }
 
 main()

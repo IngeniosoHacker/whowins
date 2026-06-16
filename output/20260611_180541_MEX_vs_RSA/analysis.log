@@ -1,8 +1,0 @@
-[INFO] Cargando datos: /home/juampa/BETBETBET/whowins/config/teams_wc2026.json
-[INFO] Fuente de datos: PostgreSQL
-[INFO] Conexión PostgreSQL establecida.
-[INFO] Jugadores cargados desde DB: 30
-[INFO] Partidos cargados desde DB: 0
-[INFO] Equipos leídos desde DB: 47
-[INFO] Construyendo features históricas...
-[ERROR] Sin jugadores para: ALG

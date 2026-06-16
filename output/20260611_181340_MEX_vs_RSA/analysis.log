@@ -1,0 +1,29 @@
+[INFO] Cargando datos: /home/juampa/BETBETBET/whowins/config/teams_wc2026.json
+[INFO] Fuente de datos: PostgreSQL
+[INFO] Conexión PostgreSQL establecida.
+[INFO] Jugadores cargados desde DB: 30
+[INFO] Partidos cargados desde DB: 0
+[INFO] Equipos leídos desde DB: 47
+[INFO] Construyendo features históricas...
+[INFO] ANOVA multifactorial...
+[INFO] Factores sig: 
+[INFO] Regresión Multinomial (home / draw / away)...
+[INFO] Multinomial falló: need two or more classes to fit a multinom model
+[INFO] Multinomial accuracy: NA
+[INFO] [WARN] Sin jugadores en DB para MEX - usando valores promedio
+[INFO] [WARN] Sin jugadores en DB para RSA - usando valores promedio
+[INFO] Naive Bayes por jugador...
+[INFO] Distribución Poisson de goles...
+[INFO]   Sin partidos históricos — estimando goles desde stats de jugadores
+[INFO] [WARN] Sin jugadores en DB para MEX - usando valores promedio
+[INFO] [WARN] Sin jugadores en DB para RSA - usando valores promedio
+[INFO] Actualización Bayesiana head-to-head...
+[INFO]   Enfrentamientos directos encontrados: 0
+[INFO] Fusionando modelos (ensemble Bayesiano)...
+Error in if (nb_sum <= 0) nb_sum <- 1 : 
+  missing value where TRUE/FALSE needed
+Calls: main -> fuse_models
+In addition: Warning message:
+In multinom(frm, data = dc, trace = FALSE, maxit = 300) :
+  groups ‘home’ ‘draw’ ‘away’ are empty
+Execution halted

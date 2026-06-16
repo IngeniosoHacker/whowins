@@ -64,6 +64,16 @@ def connect(host, port, user, password, dbname):
     )
 
 
+
+def safe_autocommit(conn, value: bool):
+    """Toggle autocommit safely — commits any open transaction first."""
+    try:
+        if not conn.autocommit:
+            conn.commit()
+    except Exception:
+        pass
+    conn.autocommit = value
+
 def db_exists(host, port, user, password, dbname) -> bool:
     conn = connect(host, port, user, password, "postgres")
     conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
@@ -325,14 +335,15 @@ def step_seed(conn, dry_run) -> bool:
 
     # Verificar conteos
     try:
-        conn.autocommit = True
+        try: conn.commit()
+        except: pass
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM teams")
         nt = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM wc2026_groups")
         ng = cur.fetchone()[0]
         cur.close()
-        conn.autocommit = False
+        safe_autocommit(conn, False)
         print(f"  ✓ {nt} equipos  |  {ng} asignaciones de grupo  ({n} statements)")
     except Exception as e:
         print(f"  [WARN] No se pudo verificar conteos: {e}")
@@ -355,7 +366,8 @@ def step_schedule(conn, dry_run) -> bool:
         return True
 
     try:
-        conn.autocommit = True
+        try: conn.commit()
+        except: pass
         cur = conn.cursor()
         cur.execute("""
             SELECT s.season_id FROM seasons s
@@ -364,7 +376,7 @@ def step_schedule(conn, dry_run) -> bool:
         """)
         row = cur.fetchone()
         cur.close()
-        conn.autocommit = False
+        safe_autocommit(conn, False)
         if not row:
             print("  [WARN] Temporada WC2026 no encontrada — omitiendo calendario")
             return True
@@ -373,7 +385,7 @@ def step_schedule(conn, dry_run) -> bool:
         return True
     except Exception as e:
         print(f"  [ERROR] {e}")
-        conn.autocommit = False
+        safe_autocommit(conn, False)
         return True   # no fatal
 
 
@@ -390,13 +402,14 @@ def step_load_players(conn, args, dry_run) -> bool:
 
     # season_id — usar autocommit para la consulta
     try:
-        conn.autocommit = True
+        try: conn.commit()
+        except: pass
         cur = conn.cursor()
         season_id = loader_mod.get_season_id(cur, "2026")
         cur.close()
-        conn.autocommit = False
+        safe_autocommit(conn, False)
     except Exception as e:
-        conn.autocommit = False
+        safe_autocommit(conn, False)
         print(f"  [ERROR] season_id: {e}")
         return False
 
@@ -471,13 +484,76 @@ def step_generate_config(conn, args, dry_run) -> bool:
 
     try:
         CONFIG_DIR.mkdir(exist_ok=True)
-        conn.rollback()
-        conn.autocommit = True
+
+        # Commit any pending transaction before running a plain SELECT
+        # (psycopg2 raises ProgrammingError if you toggle autocommit mid-transaction)
+        try:
+            conn.commit()
+        except Exception:
+            pass
 
         team_filter  = [t.upper() for t in args.teams]  if args.teams  else None
         group_filter = [g.upper() for g in args.groups] if args.groups else None
-        teams = gen_mod.get_wc2026_teams(conn, group_filter, team_filter)
-        conn.autocommit = False
+
+        # Run the query in its own cursor — no autocommit toggle needed
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        where_clauses, params = [], []
+        if group_filter:
+            where_clauses.append("AND g.wc_group = ANY(%s)")
+            params.append(group_filter)
+        if team_filter:
+            where_clauses.append("AND t.team_code = ANY(%s)")
+            params.append(team_filter)
+        where = " ".join(where_clauses)
+
+        cur.execute(f"""
+            SELECT
+                t.team_code, t.full_name, t.short_name,
+                t.altitude_home_m, t.stadium,
+                g.wc_group, g.seed,
+                COALESCE(
+                    array_agg(p.player_code ORDER BY tp.jersey_number NULLS LAST)
+                    FILTER (WHERE p.player_code IS NOT NULL),
+                    ARRAY[]::varchar[]
+                ) AS player_codes
+            FROM teams t
+            JOIN wc2026_groups g      ON g.team_code  = t.team_code
+            LEFT JOIN team_players tp ON tp.team_id   = t.team_id
+                AND tp.season_id = (
+                    SELECT s.season_id FROM seasons s
+                    JOIN competitions c ON c.competition_id = s.competition_id
+                    WHERE c.short_name = 'WC2026' AND s.label = '2026'
+                )
+                AND tp.status = 'active'
+            LEFT JOIN players p       ON p.player_id  = tp.player_id
+            WHERE 1=1 {where}
+            GROUP BY t.team_code, t.full_name, t.short_name,
+                     t.altitude_home_m, t.stadium, g.wc_group, g.seed
+            ORDER BY g.wc_group, g.seed
+        """, params if params else None)
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.commit()
+
+        teams = {}
+        for row in rows:
+            raw = row["player_codes"]
+            if isinstance(raw, list):
+                codes_list = [c for c in raw if c]
+            elif isinstance(raw, str):
+                codes_list = [c.strip() for c in raw.strip("{}").split(",") if c.strip()]
+            else:
+                codes_list = []
+            teams[row["team_code"]] = {
+                "full_name":       row["full_name"],
+                "short_name":      row["short_name"],
+                "stadium":         row["stadium"] or f"Estadio {row['full_name']}",
+                "altitude_home_m": row["altitude_home_m"],
+                "wc_group":        row["wc_group"],
+                "seed":            row["seed"],
+                "players":         codes_list,
+            }
 
         if not teams:
             print("  [WARN] Sin equipos en DB — usando config CSV de ejemplo")
@@ -494,15 +570,16 @@ def step_generate_config(conn, args, dry_run) -> bool:
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
 
-        codes = list(teams.keys())
+        code_list = list(teams.keys())
         print(f"  ✓ {out_path}")
         print(f"     {len(teams)} equipos incluidos")
-        if len(codes) >= 2:
+        if len(code_list) >= 2:
             print(f"\n  Listo para predecir:")
-            print(f"     whowins {codes[0]} {codes[1]} --config config/teams_wc2026.json")
+            print(f"     whowins {code_list[0]} {code_list[1]} --config config/teams_wc2026.json")
         return True
     except Exception as e:
-        conn.autocommit = False
+        try: conn.rollback()
+        except: pass
         print(f"  [ERROR] {e}")
         return True   # no fatal
 
@@ -546,7 +623,8 @@ def print_summary(conn, args):
     print("  ✅  SETUP COMPLETADO")
     print(f"{'═'*60}")
     try:
-        conn.autocommit = True
+        try: conn.commit()
+        except: pass
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM players");       np = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM player_seasons");ns = cur.fetchone()[0]
@@ -559,7 +637,7 @@ def print_summary(conn, args):
         """)
         top = cur.fetchall()
         cur.close()
-        conn.autocommit = False
+        safe_autocommit(conn, False)
         print(f"\n  DB            : {args.dbname} @ {args.host}:{args.port}")
         print(f"  Equipos       : {nt}")
         print(f"  Jugadores     : {np}")
@@ -674,7 +752,7 @@ Ejemplos:
         try:
             conn = connect(args.host, args.port, args.user,
                            args.password, args.dbname)
-            conn.autocommit = False
+            safe_autocommit(conn, False)
             print(f"  ✓ Conectado a '{args.dbname}'")
         except Exception as e:
             print(f"\n[ERROR] Conexión a '{args.dbname}': {e}")
